@@ -9,8 +9,7 @@ from datetime import datetime
 import sys
 import functools
 import typing  # For typehinting
-import requests
-import json
+
 from discord.ext import commands, tasks
 
 import discord
@@ -21,7 +20,6 @@ import MapCoreFunctions as mapcorefunctions
 from MapFetcher import MapFetcher
 import config
 from Webhook import MapcoreBot
- 
 
 import Paginator
 
@@ -35,9 +33,8 @@ file = logging.handlers.TimedRotatingFileHandler(
 logging.basicConfig(
     level=logging.ERROR,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    #handlers=[logging.FileHandler("debug2.log"), logging.StreamHandler()],
+    # handlers=[logging.FileHandler("debug2.log"), logging.StreamHandler()],
 )
-
 
 logger = logging.getLogger("")
 logger.addHandler(file)
@@ -45,7 +42,7 @@ logger.error("Started")
 
 bot_setup = mapcorefunctions.setup_processor(sys.argv)
 
-logger.error(f'Running {bot_setup["version"]}')
+logger.error('Running %s', bot_setup["version"])
 
 # bot setup
 intents = discord.Intents.default()
@@ -59,7 +56,6 @@ bot = commands.Bot(intents=intents, command_prefix="!", help_command=help_comman
 bot.queue_count_dict = mapcorefunctions.build_input_dict()
 bot.map_fetcher = MapFetcher("*", logger)
 bot.cest_timezone = pytz.timezone("Europe/Berlin")
-
 
 bot.on_going_messages = {}
 bot.webhooker = MapcoreBot()
@@ -158,8 +154,8 @@ async def matchcount(ctx, *arg):
         await Paginator.Simple().start(ctx, pages=embeds)
 
     except Exception as e:
-        error_string = f"Error in new_match_count, {e}"
-        logger.error(error_string, exc_info=True)
+        message_string = f"Error in new_match_count, {e}"
+        logger.error(message_string, exc_info=True)
 
 
 @bot.command()
@@ -201,8 +197,8 @@ async def matchcountall(ctx, *arg):
         await Paginator.Simple().start(ctx, pages=embeds)
 
     except Exception as e:
-        error_string = f"Error in new_match_count, {e}"
-        logger.error(error_string, exc_info=True)
+        match_all_error = f"Error in new_match_count, {e}"
+        logger.error(match_all_error, exc_info=True)
 
 
 @bot.command(aliases=["dbdata"])
@@ -228,8 +224,8 @@ async def dbdescribe(ctx, *arg):
 
         await ctx.send(return_message1)
     except Exception as e:
-        error_string = f"Error in dbdescribe, {e}"
-        logger.error(error_string, exc_info=True)
+        dbdescribe_error_string = f"Error in dbdescribe, {e}"
+        logger.error(dbdescribe_error_string, exc_info=True)
 
 
 @bot.command(aliases=["devbackfiller"])
@@ -237,16 +233,16 @@ async def backfiller(ctx, number_of_games=20, offset=0):
     """Command to back fill last 20 games into database, does hang the bot so careful!"""
     try:
         await ctx.send(f"Back filling {number_of_games} for all hubs")
-        # Pass the args and kwargs here
-        r = await run_backfilling(backfilling_func, number_of_games, offset)
-        # print(r)  # -> "some stuff"
+
+        await run_backfilling(backfilling_func, number_of_games, offset)
+
         games_dict = bot.map_fetcher.db.print_all()
         number_of_games = len(games_dict)
         return_message = f"There are now {number_of_games} matches in the database\n"
         await ctx.send(return_message)
     except Exception as e:
-        error_string = f"Error in backfiller, {e}"
-        logger.error(error_string, exc_info=True)
+        backfiller_error_string = f"Error in backfiller, {e}"
+        logger.error(backfiller_error_string, exc_info=True)
 
 
 async def run_backfilling(backfilling_func: typing.Callable, *args, **kwargs):
@@ -282,7 +278,7 @@ async def games(ctx, map_name: str, number_of_games=30, offset=0, *arg):
             number_of_games == total_number_of_games
 
         # break into chunks of 15 games to stay within 2000 character limit
-        list_of_games = list_of_games[offset : number_of_games + offset]
+        list_of_games = list_of_games[offset: number_of_games + offset]
         chunks_of_games = mapcorefunctions.divide_chunks(list_of_games, 15)
 
         # message back as many chunks as we need
@@ -357,7 +353,7 @@ async def chart(ctx, number_of_days=1):
     await ctx.send(file=image)
 
 
-async def friday_map_count(bot):
+async def friday_map_count():
     """function to post the last week map on a friday, triggered by ping"""
     # when called, make the channel chart
     games_data = bot.map_fetcher.db.last_week_matches()
@@ -374,16 +370,19 @@ async def friday_map_count(bot):
                 image = discord.File(chart_file)
                 await temp.send(file=image)
 
-    # setup the fridaychannels and post image
-    '''channels_friday = []
-    for channel in channels_to_post_summary:
-        temp = bot.get_channel(channel)
-        channels_friday.append(temp)
-        image = discord.File(chart_file)
-        await temp.send(file=image)
-'''
 
-async def process_games_dict(bot, games_dict, pop_games_flag=False):
+async def process_games_dict(games_dict, pop_games_flag=False):
+    """
+    Processes a dictionary of game objects, updating or creating Discord messages for each game.
+    Args:
+        games_dict (dict): A dictionary where keys are game IDs and values are game objects.
+        pop_games_flag (bool, optional): If True, removes processed games from the dictionary. Defaults to False.
+    Returns:
+        dict: The updated games_dict, potentially with processed games removed.
+    Note:
+        - Each game object is expected to have a `build_embedded_message()` method and a `discord_messages` attribute.
+        - The global `bot.channels` is used to determine where to send or edit messages.
+    """
 
     processed_games = []
 
@@ -410,20 +409,12 @@ async def process_games_dict(bot, games_dict, pop_games_flag=False):
     return games_dict
 
 
-@tasks.loop(seconds=180)
+@tasks.loop(seconds=60)
 async def game_watcher():
     """function that runs every minute
     checks queue statuses, messages if less than"""
 
-    """processed_dict = process_games_dict(bot, bot.webhooker.ongoing_games)
-    bot.webhooker.ongoing_games = processed_dict
-
-    processed_dict = process_games_dict(bot, bot.webhooker.completed_games, True)
-    bot.webhooker.completed_games = processed_dict
     
-    processed_dict = process_games_dict(bot, bot.webhooker.cancelled_games, True)
-    bot.webhooker.cancelled_games = processed_dict
-    """
     pop_games = []
 
     ongoing_games = bot.webhooker.ongoing_games
@@ -445,15 +436,15 @@ async def game_watcher():
 
             if game.cancelled or (game.finished and game.demoed):
                 pop_games.append(game_id)
-    # print(pop_games)
-    logger.debug(f"popping from {ongoing_games}")
-    # logger.error(bot.webhooker.ongoing_games)
-    logger.debug(f"popping with {pop_games}")
-    # logger.error(pop_games)
+                
+    logger.debug("popping from %s", ongoing_games)
+
+    logger.debug("popping with %s", pop_games)
+
     for game_id in pop_games:
 
         bot.webhooker.ongoing_games.pop(game_id)
-    logger.debug(f"popping result {ongoing_games}")
+    logger.debug("popping result %s", ongoing_games)
 
     now_cest = datetime.now(bot.cest_timezone)
     if now_cest.weekday() == 4 and now_cest.hour == 18 and now_cest.minute == 0:
@@ -489,6 +480,6 @@ try:
     bot.run(bot_setup["token"])
 
 except Exception as e:
-    error_string = f"Error in bot, {e}"
-    logger.error(error_string, exc_info=True)
+    bot_error_string = f"Error in bot, {e}"
+    logger.error(bot_error_string, exc_info=True)
 
